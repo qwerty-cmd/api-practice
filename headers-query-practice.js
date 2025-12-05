@@ -424,10 +424,312 @@ const contentNegotiation = async () => {
 // EXERCISES:
 // ===========================================
 // 1. Build a query string builder utility function
+const queryStringBuilder = (params) => {
+  // Use URLSearchParams for proper encoding
+  const query = new URLSearchParams(params);
+
+  // Convert query to string to test the final output
+  return query.toString();
+};
+
+// Testing queryStringBuilder
+console.log("\n=== Testing Query String Builder ===\n");
+
+// Test 1: Basic parameters
+console.log("Test 1: Basic parameters");
+const test1 = { page: 1, limit: 10, sort: "name" };
+console.log("Input:", test1);
+console.log("Output:", queryStringBuilder(test1));
+console.log("Expected: page=1&limit=10&sort=name\n");
+
+// Test 2: Special characters (encoding test)
+console.log("Test 2: Special characters");
+const test2 = { q: "hello world", filter: "price>100" };
+console.log("Input:", test2);
+console.log("Output:", queryStringBuilder(test2));
+console.log("Expected: Special chars should be encoded\n");
+
+// Test 3: Boolean and number values
+console.log("Test 3: Different data types");
+const test3 = { active: true, count: 42, price: 99.99 };
+console.log("Input:", test3);
+console.log("Output:", queryStringBuilder(test3));
+console.log("Expected: active=true&count=42&price=99.99\n");
+
+// Test 4: Empty object
+console.log("Test 4: Empty object");
+const test4 = {};
+console.log("Input:", test4);
+console.log("Output:", queryStringBuilder(test4));
+console.log("Expected: (empty string)\n");
+
+// Test 5: Complex query with the full basicQueryParams
+console.log("Test 5: Full basicQueryParams");
+const params = basicQueryParams;
+console.log("Output:", queryStringBuilder(params));
+console.log("\n");
+
 // 2. Create a header manager class
+class HeaderManager {
+  constructor() {
+    // Initialise default headers
+    this.defaultHeaders = {
+      "Content-Type": "application/json",
+      "User-Agent": "MyApp/1.0",
+    };
+    this.authToken = null;
+  }
+
+  // Set auth token
+  setAuthToken(token) {
+    this.authToken = token;
+    if (token) {
+      this.defaultHeaders["Authorization"] = `Bearer ${token}`;
+    } else {
+      delete this.defaultHeaders["Authorization"];
+    }
+  }
+
+  // get headers for auth request
+  getAuthHeaders() {
+    return {
+      ...this.defaultHeaders,
+      Authorization: `Basic ${this.authToken}`,
+    };
+  }
+
+  // get headers for public requests
+  getPublicHeaders() {
+    return { ...this.defaultHeaders };
+  }
+
+  // Add custom header
+  addHeader(key, value) {
+    this.defaultHeaders[key] = value;
+  }
+
+  // Remove header
+  removeHeader(key) {
+    delete this.defaultHeaders[key];
+  }
+}
+
 // 3. Implement automatic retry on 503 with Retry-After header
+const axiosRetryExample = async (url, maxRetries = 3) => {
+  let attempts = 0;
+
+  // As long as the attempts are less than or equal to the maxRetries
+  while (attempts < maxRetries) {
+    try {
+      // Attempt making the request
+      const response = await axios.get(url);
+      return response.data;
+    } catch (error) {
+      // If a 503 is received, check for retry-after header
+      if (error.response?.status === 503) {
+        const retryAfter = error.response.headers["retry-after"];
+
+        // Wait for the specified time before retrying
+        const waitTime = (retryAfter ? parseInt(retryAfter) : 1) * 1000;
+        console.log(
+          `503 received. Retrying after ${waitTime / 1000} seconds...`
+        );
+
+        // Wait before next attempt
+        await new Promise((res) => setTimeout(res, waitTime));
+        attempts++;
+      }
+    }
+  }
+};
 // 4. Parse Link header for pagination
+const parseLinkHeader = (linkHeader) => {
+  const links = {};
+  if (!linkHeader) return links;
+  const parts = linkHeader.split(",");
+  parts.forEach((part) => {
+    const match = part.match(/<([^>]+)>;\s*rel="([^"]+)"/);
+    if (match) {
+      const url = match[1];
+      const rel = match[2];
+      links[rel] = url;
+    }
+  });
+
+  return links;
+};
+
+const response = await axios.get("https://api.example.com/items");
+const linkHeader = response.headers.link;
+const links = parseLinkHeader(linkHeader);
+console.log("Parsed Links:", links);
+
 // 5. Build a response cache using ETag/Last-Modified
+class ResponseCache {
+  constructor() {
+    this.cache = new Map();
+  }
+
+  // Get cached response or make a request
+  async get(url) {
+    const cached = this.cache.get(url);
+    const headers = {};
+
+    // Add conditional headers if attached
+    if (cached) {
+      if (cached.etag) {
+        headers["If-None-Match"] = cached.etag;
+      }
+      if (cached.lastModified) {
+        headers["If-Modified-Since"] = cached.lastModified;
+      }
+    }
+    try {
+      // Make the request with conditional headers
+      const response = await axios.get(url, { headers });
+
+      // If 200, update cache
+      if (response.status === 200) {
+        this.cache.set(url, {
+          data: response.data,
+          etage: response.headers.etag,
+          lastModified: response.headers["last-modified"],
+        });
+        return response.data;
+      }
+      // If something has changed, return the cached data and throw a new error
+    } catch (error) {
+      if (error.response?.status === 304 && cached) {
+        return cached.data;
+      }
+      // Create error stack
+      throw new Error(
+        `Request failed: ${error.message}, ERROR STACK: ${error.stack}`
+      );
+    }
+  }
+}
 // 6. Create a rate limit tracker from response headers
+class RateLimitTrakcer {
+  constructor() {
+    this.limit = null;
+    this.remaining = null;
+    this.reset = null;
+  }
+
+  // Update tracker from response headers
+  update(response) {
+    this.limit = parseInt(response.headers["x-ratelimit-limit"]);
+    this.remaining = parseInt(response.headers["x-ratelimit-remaining"]);
+    this.reset = parseInt(response.headers["x-ratelimit-reset"]);
+  }
+
+  logStatus() {
+    if (this.remaining !== null) {
+      console.log("Rate Limit Status:");
+      console.log(`  Limit: ${this.limit}`);
+      console.log(`  Remaining: ${this.remaining}`);
+      console.log(
+        `  Resets at: ${new Date(this.reset * 1000).toLocaleTimeString()}`
+      );
+    }
+  }
+
+  // Check if we should wait
+  shouldWait() {
+    if (this.remaining === 0) {
+      const now = Date.now();
+      const waitTime = this.reset * 1000 - now;
+      console.log(`Rate limit exceeded. Wait for ${waitTime / 1000}s`);
+      return true;
+    }
+    return false;
+  }
+
+  getStatus() {
+    return {
+      limit: this.limit,
+      remaining: this.remaining,
+      reset: new Date(this.reset * 1000),
+      percentageUsed: this.limit
+        ? Math.round(((this.limit - this.remaining) / this.limit) * 100)
+        : 0,
+    };
+  }
+}
+
 // 7. Handle different response formats (JSON, XML, CSV)
+const handleDifferentFormats = async (url, format) => {
+  const response = await axios.get(url, {
+    headers: {
+      Accept:
+        format === "json"
+          ? "application/json"
+          : format === "xml"
+          ? "application/xml"
+          : format === "csv"
+          ? "text/csv"
+          : "application/json",
+    },
+  });
+
+  switch (format) {
+    case "json":
+      return response.data;
+
+    case "xml":
+      const xml2js = require("xml2js");
+      const parser = new xml2js.Parser();
+      return await parser.parserStringPromise(response.data);
+
+    case "csv":
+      const parse = require("csv-parse/lib/sync");
+      return parse(response.data, {
+        columns: true,
+        skip_empty_lines: true,
+      });
+
+    default:
+      return response.data;
+  }
+};
+
 // 8. Implement request signing with custom headers
+const crypto = require("crypto");
+
+const signRequest = (method, url, body, secretKey) => {
+  const timestamp = Date.now();
+  const nonce = crypto.randomBytes(16).toString("hex");
+
+  // Create string to sign
+  const stringToSign = [
+    method,
+    url,
+    timestamp,
+    nonce,
+    JSON.stringify(body),
+  ].join("\n");
+
+  // Create HMAC signature
+  const signature = crypto
+    .createHmac("sha256", secretKey)
+    .update(stringToSign)
+    .digest("hex");
+
+  // Return custom headers
+  return {
+    "X-Timestamp": timestamp,
+    "X-Nonce": nonce,
+    "X-Signature": signature,
+  };
+};
+
+// Usage
+const headers = signRequest(
+  "POST",
+  "/api/trade",
+  { symbol: "AAPL", qty: 10 },
+  "my-secret-key"
+);
+
+await axios.post("/api/trade", { symbol: "AAPL", qty: 10 }, { headers });
